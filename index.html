@@ -1,0 +1,746 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>即时兑换汇率对比（多链版） v20251117-UI-OPTIMIZED</title>
+<style>
+  body { font-family: -apple-system, "Helvetica Neue", Arial; margin: 12px; }
+  input, button, select, textarea { font-size: 15px; padding: 4px; border-radius: 4px; border: 1px solid #ccc; }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+  th, td { border-bottom: 1px solid #ddd; padding: 8px; text-align:left; }
+  .ok { color: green; } .err { color: #c00; }
+  .small { font-size: 13px; color: #666; }
+  .adapter-item { border: 1px solid #eee; padding: 8px; margin: 6px 0; border-radius: 4px; background: #f9f9f9; }
+  .section-title { margin-top: 20px; border-bottom: 2px solid #555; padding-bottom: 5px; }
+  .config-area { border:1px solid #aaa;padding:8px;margin-top:16px;background:#f5f5f5;border-radius:4px; }
+  .summary { margin-top: 15px; padding: 10px; border: 1px solid #eee; border-radius: 4px; background: #f0f8ff; }
+  .summary b { font-size: 1.1em; }
+  .best-mark { color: green; font-weight: bold; margin-left: 4px; }
+  .output-cell { font-size: 1.05em; }
+  .output-cell.best { font-size: 1.15em; }
+  .warn-item { color: orange; font-weight: bold; margin-top: 5px; }
+  
+  /* 适配器列表样式 */
+  .adapter-filter-list { margin-top: 5px; padding: 5px; border: 1px dashed #ccc; background: #fff; max-height: 200px; overflow-y: auto; }
+  .adapter-filter-item { 
+    display: inline-block; padding: 4px 8px; margin: 3px; border: 1px solid #d0d0d0; border-radius: 4px; cursor: pointer; font-size: 13px; background: #fff; 
+    position: relative; 
+    padding-left: 18px; 
+    transition: all 0.2s ease-in-out; /* 增加过渡效果 */
+  }
+  .adapter-filter-item:hover { background: #e9e9e9; }
+
+  /* 【修复 3】：编号动画丝滑修复 */
+  .adapter-filter-item span { 
+    display: inline-block;   /* 强制使用块布局，防止闪烁 */
+  }
+  
+  /* 点击后的选中状态 (Active) 样式增强 */
+  .adapter-filter-item.active { 
+    background: #ff5757; 
+    color: white; 
+    border-color: #ff5757; 
+    font-weight: bold;
+    box-shadow: 0 0 5px rgba(255, 87, 87, 0.5); 
+  }
+  .adapter-filter-item.locked { border-color: #28a745; }
+  .adapter-filter-item.locked.active { 
+    background: #32cd32; 
+    border-color: #32cd32;
+    box-shadow: 0 0 5px rgba(50, 205, 50, 0.5);
+  }
+
+  /* 选中 ✅ 标记样式 */
+  .adapter-filter-item.selected::before {
+    content: '✅';
+    position: absolute;
+    left: 1px;
+    top: 50%;
+    transform: translateY(-50%) scale(0.75);
+  }
+  
+  /* 联系区样式 */
+  .contact-area { 
+    border: 1px solid #007bff;
+    padding: 10px;
+    margin-top: 20px;
+    background: #e6f7ff;
+    border-radius: 4px; 
+  }
+  .contact-area ul {
+    list-style: none;
+    padding-left: 0;
+  }
+  .contact-area li {
+    margin-bottom: 5px;
+  }
+</style>
+</head>
+<body>
+<h2>即时兑换汇率对比（多链版）</h2>
+
+<div>
+  <label>币种From:<input id="from" style="width:80px"></label>
+  <label>链From:<input id="fromNetwork" style="width:80px"></label>
+  <label>币种To:<input id="to" style="width:80px"></label>
+  <label>链To:<input id="toNetwork" style="width:80px"></label>
+  <label>数量:<input id="amount" style="width:80px"></label>
+
+  <label style="margin-left:12px;">
+    <input type="radio" name="mode" id="modeFloating" value="floating" checked> 查浮动
+  </label>
+  <label>
+    <input type="radio" name="mode" id="modeLocked" value="locked"> 查锁定
+  </label>
+
+  <button id="compare" style="margin-left:8px;">一键比价</button>
+  <button id="copyJson" style="margin-left:8px; display:none;">复制 JSON</button>
+</div>
+
+<div id="status" class="small" style="margin:10px 0;">请设置 WORKER_URL</div>
+<div id="warnings" style="margin:10px 0;"></div>
+
+<h4 style="color:#007bff;">浮动汇率</h4>
+<table id="floatingTable"><thead><tr><th>交易所</th><th>预估输出量</th><th>操作</th></tr></thead><tbody></tbody></table>
+<div id="floatingSummary" class="summary" style="display:none;"></div>
+
+<h4 style="color:#28a745;">锁定汇率</h4>
+<table id="lockedTable"><thead><tr><th>交易所</th><th>预估输出量</th><th>操作</th></tr></thead><tbody></tbody></table>
+<div id="lockedSummary" class="summary" style="display:none;"></div>
+
+<div class="config-area">
+  <h3 class="section-title">交易所适配器管理（需密码）  </h3>
+  <div>
+    <input id="adminPass" type="password" placeholder="输入管理密码" style="width:140px;">
+    <button id="loadFromKV">从后端加载配置</button>
+    <button id="saveToKV">保存到后端 (含适配器)</button>
+    <button id="lockCompareMode" style="margin-left:8px; display:none;">🔒 锁定比价/非开源</button>
+  </div>
+
+  <div style="margin-top:10px;">
+    <button id="showAllAdapters" class="small" style="margin-bottom: 5px;">显示全部适配器</button>
+    <div style="border:1px solid #007bff; padding: 5px; margin-top: 5px; border-radius: 4px;">
+        <div style="font-weight: bold; color: #007bff; font-size: 14px;">浮动汇率列表 (Floating)</div>
+        <div id="floatingAdapterList" class="adapter-filter-list"></div>
+    </div>
+    
+    <div style="border:1px solid #28a745; padding: 5px; margin-top: 10px; border-radius: 4px;">
+        <div style="font-weight: bold; color: #28a745; font-size: 14px;">锁定汇率列表 (Locked)</div>
+        <div id="lockedAdapterList" class="adapter-filter-list"></div>
+    </div>
+  </div>
+
+  <div class="small">可添加或删除自定义交易所 API。配置将保存到 Cloudflare Worker KV 中。</div>
+  <button id="addAdapter" style="margin: 5px 0 10px 0;">新增交易所</button>
+  <div id="adapterList"></div>
+</div>
+
+<h2>全局配置管理</h2>
+<div id="admin-panel" class="config-area">
+  <input id="admin-pass" placeholder="管理密码" type="password" style="width:140px;" />
+  <input id="api-key" placeholder="ChangeNOW API Key" style="width:240px;" />
+  <button onclick="saveConfigWrapper(true)">保存全局配置</button> 
+  <div style="margin-top:10px;">
+    <label>网络别名映射 (NETWORK_ALIASES JSON): 
+      <textarea id="network-aliases-json" style="width:100%; height:120px;">
+{
+  "BTC": "BITCOIN",
+  "ETH": "ETHEREUM",
+  "TRX": "TRON",
+  "BNB": "BSC",
+  "SOL": "SOLANA",
+  "MAINNET": "BITCOIN"
+}
+      </textarea>
+    </label>
+    </div>
+</div>
+
+<div class="contact-area">
+  <h4 class="section-title" style="margin-top:0; border-bottom: none;">联系作者</h4>
+  <p>有建议 / 合作 / 问题？</p>
+  <p>
+    <a id="mail" href="#" style="color:#007bff;"></a>
+    <br>
+    <a href="https://github.com/yourname/your-repo" target="_blank" rel="noopener">🐙 GitHub 仓库</a>
+  </p>
+</div>
+
+
+<script>
+const WORKER_URL = 'https://your-worker.your-username.workers.dev'; 
+
+// 【修复 4】：ChangeNOW 默认适配器修复：使用固定估算和 rate 模式
+// 原始硬编码的两个 ChangeNOW 适配器已根据用户请求删除，adapters 初始化为空数组
+let adapters = []; 
+let queryPair = {}; 
+let lastResults = null;
+let visibleAdapterIndex = 'all'; 
+
+function escapeHtml(s) {
+  if (!s) return '';
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function buildRateRows(data, bestIdx = 0) {
+  return data.map((r, i) => {
+    const best = i === bestIdx && r.ok && r.outputAmount != null;
+    
+    const outputDisplay = r.ok && r.outputAmount != null
+      ? `${Number(r.outputAmount).toFixed(6)} ${queryPair.to}`
+      : `<span class="err">${escapeHtml(r.error || '失败')}</span>`;
+
+    const linkTag = r.ok && r.link && /^https?:\/\//i.test(r.link)
+      ? `<a href="${escapeHtml(r.link)}" target="_blank" rel="noopener">前往</a>`
+      : '-';
+
+    return `
+      <tr>
+        <td>${escapeHtml(r.name || '-')}${best ? '<span class="best-mark">Best</span>' : ''}</td>
+        <td class="output-cell ${best ? 'best' : ''}" style="font-weight:${best?'bold':'normal'};color:${best?'green':'inherit'};">
+          ${outputDisplay}
+        </td>
+        <td>${linkTag}</td>
+      </tr>`;
+  }).join('');
+}
+
+// 适配器名称列表渲染 (包含编号隐藏/显示逻辑)
+function renderAdapterFilterList() {
+  const floatingList = document.getElementById('floatingAdapterList');
+  const lockedList = document.getElementById('lockedAdapterList');
+  floatingList.innerHTML = '';
+  lockedList.innerHTML = '';
+  
+  adapters.forEach((a, i) => {
+    const listItem = document.createElement('span');
+    listItem.className = `adapter-filter-item ${a.rateType === 'locked' ? 'locked' : ''}`;
+    listItem.classList.toggle('selected', a.selected !== false); 
+    
+    listItem.dataset.index = i;
+    listItem.dataset.rateType = a.rateType;
+
+    // 1. 创建编号元素（默认隐藏）
+    const indexSpan = document.createElement('span');
+    indexSpan.textContent = `[#${i + 1}] `;
+    indexSpan.style.opacity = (i === visibleAdapterIndex) ? '1' : '0'; // 选中常显
+    indexSpan.style.marginRight = '4px';
+    indexSpan.style.transition = 'opacity 0.2s'; 
+
+    // 2. 创建名称文本
+    const nameText = document.createTextNode(a.name || '未命名');
+    
+    listItem.appendChild(indexSpan);
+    listItem.appendChild(nameText);
+    
+    // 3. 悬停效果：悬停时显示数字
+    listItem.onmouseover = () => { indexSpan.style.opacity = '1'; };
+    listItem.onmouseout = () => { if (i !== visibleAdapterIndex) indexSpan.style.opacity = '0'; };
+    
+    // 4. 点击后的高亮状态
+    if (i === visibleAdapterIndex) {
+        listItem.classList.add('active');
+    }
+
+    listItem.onclick = () => showAdapter(i); 
+
+    if (a.rateType === 'floating') {
+        floatingList.appendChild(listItem);
+    } else if (a.rateType === 'locked') {
+        lockedList.appendChild(listItem);
+    }
+  });
+}
+
+function renderAdapters() {
+  const container = document.getElementById('adapterList');
+  const activeElement = document.activeElement;
+  
+  container.innerHTML = '';
+
+  adapters.forEach((a, i) => {
+    const mappingsJson = a.mappings ? JSON.stringify(a.mappings, null, 2) : '';
+    const headersJson = a.headers ? JSON.stringify(a.headers, null, 2) : '';
+    
+    let bodyVal = '';
+    if (a.body) {
+        bodyVal = typeof a.body === 'object' ? JSON.stringify(a.body, null, 2) : String(a.body);
+    }
+    const bodyJson = bodyVal;
+
+    let parsePathHint = '';
+    if (a.parseType === 'html_regex') {
+      parsePathHint = '<span class="err small">⚠️ 需要正则表达式 (e.g., /.../g) 且不能为空</span>';
+    }
+    
+    const isBatchAPIOptions = `
+        <option value="true" ${a.isBatchAPI === true || a.isBatchAPI == null ? 'selected' : ''}>是 (默认/true)</option>
+        <option value="false" ${a.isBatchAPI === false ? 'selected' : ''}>否 (false)</option>
+    `;
+
+    const div = document.createElement('div');
+    div.className = 'adapter-item';
+    div.dataset.index = i; 
+    
+    if (visibleAdapterIndex !== i && visibleAdapterIndex !== 'all') {
+        div.style.display = 'none';
+    }
+
+    div.innerHTML = `
+      <label style="float:right; margin-right:10px;">
+        <input type="checkbox" data-i="${i}" class="adapter-selector" ${a.selected !== false ? 'checked' : ''}>
+        <b>比价选中</b>
+      </label>
+      <b>[#${i + 1}] ${escapeHtml(a.name || ('适配器 ' + (i+1)))}</b><br>
+      <div class="small">显示名称 (前端可编辑):
+        <input data-i="${i}" class="name" value="${escapeHtml(a.name||'')}">
+      </div>
+      <div class="small">URL模板: 
+        <input data-i="${i}" class="url" value="${escapeHtml(a.urlTemplate||'')}">
+      </div>
+      <div class="small">链接模板: 
+        <input data-i="${i}" class="linkTemplate" value="${escapeHtml(a.linkTemplate||'')}">
+      </div>
+      <div class="small">
+        <label>请求方法:
+          <select data-i="${i}" class="method">
+            <option value="GET" ${ (a.method||'GET').toUpperCase() === 'GET' ? 'selected' : '' }>GET</option>
+            <option value="POST" ${ (a.method||'GET').toUpperCase() === 'POST' ? 'selected' : '' }>POST</option>
+          </select>
+        </label>
+      </div>
+      <div class="small">
+        <label>类型:
+          <select data-i="${i}" class="rateType">
+            <option value="floating" ${a.rateType==='floating'?'selected':''}>浮动</option>
+            <option value="locked" ${a.rateType==='locked'?'selected':''}>锁定</option>
+          </select>
+        </label>
+      </div>
+      <label>解析类型:
+        <select data-i="${i}" class="parseType">
+          <option value="json" ${a.parseType==='json'?'selected':''}>json</option>
+          <option value="html_regex" ${a.parseType==='html_regex'?'selected':''}>html_regex</option>
+        </select>
+      </label>
+
+      <label>是否为批量API (isBatchAPI):
+        <select data-i="${i}" class="isBatchAPI">
+            ${isBatchAPIOptions}
+        </select>
+      </label>
+
+      <label>解析结果为:
+        <select data-i="${i}" class="parseResultAs">
+          <option value="total" ${a.parseResultAs !== 'rate' ? 'selected' : ''}>总价 (Total)</option>
+          <option value="rate" ${a.parseResultAs === 'rate' ? 'selected' : ''}>单价 (Rate)</option>
+        </select>
+      </label>
+      <label>路径/Regex: 
+        <input data-i="${i}" class="parsePath" value="${escapeHtml(a.parsePath||'')}">
+      </label>
+      ${parsePathHint}
+      <br>
+      <div class="small">
+        <label>Headers (JSON):
+          <textarea data-i="${i}" class="headers" style="width:90%; height:70px;">${escapeHtml(headersJson)}</textarea>
+        </label>
+      </div>
+      <div class="small">
+        <label>Body (JSON 或 表单字符串):
+          <textarea data-i="${i}" class="body" style="width:90%; height:70px;">${escapeHtml(bodyJson)}</textarea>
+        </label>
+      </div>
+      <div class="small">
+        <label>币种/链名映射 (Mappings JSON): 
+          <textarea data-i="${i}" class="mappings" style="width:90%; height: 80px;">${escapeHtml(mappingsJson)}</textarea>
+        </label>
+      </div>
+      <div class="small">
+        <label>API Key (会保存到后端 KV): 
+          <input data-i="${i}" class="apiKey" value="${escapeHtml(a.apiKey||'')}">
+        </label>
+      </div>
+      <button data-i="${i}" class="del">删除</button>
+    `;
+    container.appendChild(div);
+  });
+
+  const update = (e, p) => {
+    const i = Number(e.target.dataset.i);
+    const val = e.target.value.trim();
+
+    if (p === 'mappings' || p === 'headers' || p === 'body') {
+        if (val === '') {
+            delete adapters[i][p];
+            const elementToFocus = document.activeElement; 
+            renderAdapters(); 
+            if (elementToFocus) elementToFocus.focus();
+            return; 
+        }
+        
+        if (p === 'body') {
+            try { 
+                adapters[i].body = JSON.parse(val); 
+            } catch { 
+                adapters[i].body = val;
+            }
+        } else { // mappings, headers
+            try {
+                adapters[i][p] = JSON.parse(val);
+            } catch (err) {
+                alert(`${p} 字段 JSON 格式错误: ` + err.message);
+                return;
+            }
+        }
+    } else {
+      if (p === 'parseType') {
+          adapters[i][p] = val;
+          const elementToFocus = document.activeElement;
+          renderAdapters(); 
+          if (elementToFocus) elementToFocus.focus();
+          return;
+      }
+      adapters[i][p] = val;
+    }
+  };
+  
+  container.querySelectorAll('.name').forEach(inp => inp.onchange = e => { 
+    update(e, 'name'); 
+    renderAdapterFilterList(); 
+  });
+  container.querySelectorAll('.url').forEach(inp => inp.onchange = e => update(e, 'urlTemplate'));
+  container.querySelectorAll('.linkTemplate').forEach(inp => inp.onchange = e => update(e, 'linkTemplate'));
+  container.querySelectorAll('.method').forEach(sel => sel.onchange = e => update(e, 'method'));
+  
+  container.querySelectorAll('.rateType').forEach(sel => sel.onchange = e => { 
+    const elementToFocus = document.activeElement;
+    update(e, 'rateType'); 
+    renderAdapters(); 
+    if (elementToFocus) elementToFocus.focus();
+  }); 
+
+  container.querySelectorAll('.parseType').forEach(sel => sel.onchange = e => update(e, 'parseType'));
+  container.querySelectorAll('.parsePath').forEach(inp => inp.onchange = e => update(e, 'parsePath'));
+  container.querySelectorAll('.parseResultAs').forEach(sel => sel.onchange = e => update(e, 'parseResultAs')); 
+  container.querySelectorAll('.mappings').forEach(ta => ta.onchange = e => update(e, 'mappings'));             
+  container.querySelectorAll('.apiKey').forEach(inp => inp.onchange = e => update(e, 'apiKey'));
+  container.querySelectorAll('.headers').forEach(ta => ta.onchange = e => update(e, 'headers'));
+  container.querySelectorAll('.body').forEach(ta => ta.onchange = e => update(e, 'body'));
+  container.querySelectorAll('.del').forEach(btn => btn.onclick = e => {
+    adapters.splice(Number(e.target.dataset.i), 1);
+    visibleAdapterIndex = null; 
+    renderAdapters();
+  });
+
+  container.querySelectorAll('.adapter-selector').forEach(chk => chk.onchange = e => {
+    const i = Number(e.target.dataset.i);
+    adapters[i].selected = e.target.checked;
+    if (adapters[i].selected === true) delete adapters[i].selected;
+    renderAdapterFilterList(); 
+  });
+
+  container.querySelectorAll('.isBatchAPI').forEach(sel => sel.onchange = e => {
+    const i = Number(e.target.dataset.i);
+    const val = e.target.value.trim();
+    if (val === 'true') {
+        delete adapters[i].isBatchAPI;
+    } else { 
+        adapters[i].isBatchAPI = false;
+    }
+  });
+
+  if (activeElement && activeElement.focus && activeElement.matches('input, textarea, select')) {
+    const target = container.querySelector(`[data-i="${activeElement.dataset.i}"].${activeElement.className.split(/\s+/).pop()}`);
+    if (target) target.focus();
+  }
+  
+  renderAdapterFilterList();
+
+  if (visibleAdapterIndex !== null && visibleAdapterIndex !== 'all') {
+    const newDiv = container.querySelector(`[data-index="${visibleAdapterIndex}"]`);
+    if (newDiv) newDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+function showAdapter(index) {
+    visibleAdapterIndex = index;
+    document.getElementById('adapterList').querySelectorAll('.adapter-item').forEach(div => {
+        div.style.display = (Number(div.dataset.index) === index) ? 'block' : 'none';
+    });
+    renderAdapterFilterList();
+    
+    const target = document.querySelector(`[data-index="${index}"]`);
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+document.getElementById('showAllAdapters').onclick = () => {
+    visibleAdapterIndex = 'all';
+    document.getElementById('adapterList').querySelectorAll('.adapter-item').forEach(div => {
+        div.style.display = 'block';
+    });
+    renderAdapterFilterList(); 
+}
+
+document.getElementById('addAdapter').onclick = () => {
+  adapters.unshift({ 
+    name: '新交易所', 
+    urlTemplate: '', 
+    method: 'GET', 
+    parseType: 'json', 
+    parsePath: '', 
+    parseResultAs: 'total',  
+    rateType: 'floating',
+  });
+  visibleAdapterIndex = 0; 
+  renderAdapters();
+};
+
+function disableAdminIfNoWorker() {
+  const disabled = !WORKER_URL || WORKER_URL.includes('your-worker');
+  const loadBtn = document.getElementById('loadFromKV');
+  const saveBtn = document.getElementById('saveToKV');
+  const compareBtn = document.getElementById('compare');
+  const lockBtn = document.getElementById('lockCompareMode');
+  
+  loadBtn.disabled = disabled;  
+  saveBtn.disabled = disabled;  
+  
+  compareBtn.disabled = disabled; 
+  lockBtn.disabled = disabled;
+  
+  document.getElementById('status').textContent = disabled 
+    ? '请修改 WORKER_URL 为你的 Cloudflare Worker 地址' 
+    : 'Worker 已连接';
+}
+disableAdminIfNoWorker();
+
+document.getElementById('loadFromKV').onclick = async () => {
+  const pass = document.getElementById('adminPass').value.trim();
+  if (!pass) return alert('请输入管理密码');
+  try {
+    const res = await fetch(WORKER_URL + '/getConfig', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pass })
+    });
+    if (!res.ok) throw new Error(await res.text() || 'HTTP ' + res.status);
+    const json = await res.json();
+    adapters = Array.isArray(json.adapters) ? json.adapters : [];
+    
+    if (json.CHANGENOW_API_KEY) {
+      document.getElementById('api-key').value = json.CHANGENOW_API_KEY;
+    }
+    
+    const networkAliasesJson = JSON.stringify(json.networkAliases || {}, null, 2);
+    document.getElementById('network-aliases-json').value = networkAliasesJson;
+    
+    visibleAdapterIndex = 'all'; 
+    alert('配置加载成功');
+    renderAdapters();
+  } catch (err) {
+    alert('加载失败：' + err.message);
+  } finally {
+    document.getElementById('adminPass').value = '';
+  }
+};
+
+async function saveConfigWrapper(onlyGlobal) {
+  const pass = document.getElementById(onlyGlobal ? 'admin-pass' : 'adminPass').value.trim();
+  const verb = onlyGlobal ? '全局配置' : '配置 (含适配器)';
+  
+  if (!pass) return alert(`请输入管理密码进行 ${verb} 操作`);
+  
+  try {
+    const networkAliasesStr = document.getElementById('network-aliases-json').value.trim();
+    let networkAliases = {};
+    try {
+        networkAliases = JSON.parse(networkAliasesStr);
+        if (typeof networkAliases !== 'object' || Array.isArray(networkAliases)) throw new Error('不是有效的对象');
+    } catch (e) {
+        alert('网络别名映射 JSON 格式错误: ' + e.message);
+        return; 
+    }
+
+    const globalConfig = { 
+        CHANGENOW_API_KEY: document.getElementById('api-key').value.trim(),
+        networkAliases: networkAliases
+    };
+    
+    const payload = { pass, config: globalConfig };
+    
+    if (!onlyGlobal) {
+        payload.adapters = adapters.map(a => ({ ...a }));
+    }
+
+    const res = await fetch(WORKER_URL + '/saveConfig', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const txt = await res.text();
+    if (!res.ok) throw new Error(txt || 'HTTP ' + res.status);
+    alert(`${verb} 保存成功！`);
+  } catch (err) {
+    alert(`${verb} 保存失败：` + err.message);
+  } finally {
+    document.getElementById('adminPass').value = '';
+    document.getElementById('admin-pass').value = '';
+  }
+};
+
+document.getElementById('saveToKV').onclick = () => saveConfigWrapper(false);
+
+
+document.getElementById('compare').onclick = async () => {
+  const from = document.getElementById('from').value.trim().toUpperCase() || null;
+  const to = document.getElementById('to').value.trim().toUpperCase() || null;
+  const fromNetwork = document.getElementById('fromNetwork').value.trim().toUpperCase() || null;
+  const toNetwork = document.getElementById('toNetwork').value.trim().toUpperCase() || null;
+  const amount = Number(document.getElementById('amount').value.trim());
+  
+  if (!from || !to) return alert('请输入币种 From 和 To');
+  if (isNaN(amount) || amount <= 0) return alert('数量必须是大于 0 的有效数字'); 
+
+  queryPair = { 
+    from: from, 
+    to: to, 
+    fromNetwork: fromNetwork, 
+    toNetwork: toNetwork, 
+    amount: amount 
+  };
+
+  const selectedMode = document.querySelector('input[name="mode"]:checked').value;
+  
+  const selectedAdapters = adapters.filter(a => a.selected !== false); 
+  
+  const adaptersToSend = selectedAdapters.filter(a => a.rateType === selectedMode);
+
+  if (adaptersToSend.length === 0) {
+      document.getElementById('status').textContent = `错误: 未找到匹配模式 "${selectedMode}" 的适配器。`;
+      return;
+  }
+  
+  document.getElementById('status').textContent = '查询中...';
+  document.getElementById('warnings').innerHTML = ''; 
+  ['#floatingTable tbody', '#lockedTable tbody'].forEach(s => document.querySelector(s).innerHTML = '');
+  ['#floatingSummary', '#lockedSummary'].forEach(s => document.querySelector(s).style.display = 'none');
+  document.getElementById('copyJson').style.display = 'none';
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const requestBody = { 
+      pair: queryPair, 
+      adapters: adaptersToSend, 
+    };
+
+    const res = await fetch(WORKER_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify(requestBody)
+    });
+
+    if (!res.ok) {
+      const txt = await res.text().catch(()=>null);
+      throw new Error(txt || `HTTP ${res.status}`);
+    }
+    const results = await res.json();
+    lastResults = results;
+    showResults(results);
+    
+    const total = Array.isArray(results.results) ? results.results.length : 0;
+    document.getElementById('status').textContent = `完成，共 ${total} 条，耗时 ${results.timeTaken || '?'}ms`;
+    document.getElementById('copyJson').style.display = 'inline-block';
+  } catch (e) {
+    document.getElementById('status').textContent = e.name === 'AbortError' ? '请求超时' : '错误: ' + e.message;
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
+document.getElementById('copyJson').onclick = () => {
+  if (!lastResults) return alert('无数据');
+  const jsonContent = JSON.stringify(lastResults, null, 2); // 提取 JSON 内容
+
+  navigator.clipboard.writeText(jsonContent)
+    .then(() => alert('已复制到剪贴板'))
+    .catch(() => {
+      // 【修复 1】：复制失败 Fallback
+      prompt('复制失败，请手动全选复制:', jsonContent);
+    });
+};
+
+
+function showResults(results) {
+  const allResults = results?.results || [];
+  const floating = allResults.filter(r => r?.rateType === 'floating');
+  const locked = allResults.filter(r => r?.rateType === 'locked');
+  
+  const sortFn = (a, b) => (b.outputAmount ?? -Infinity) - (a.outputAmount ?? -Infinity);
+  
+  floating.sort(sortFn);
+  locked.sort(sortFn);
+  
+  const floatingHtml = buildRateRows(floating, 0);
+  document.querySelector('#floatingTable tbody').innerHTML = floatingHtml;
+
+  const lockedHtml = buildRateRows(locked, 0);
+  document.querySelector('#lockedTable tbody').innerHTML = lockedHtml;
+  
+  renderSummary(floating.filter(r => r.ok), '#floatingSummary', floating[0]);
+  renderSummary(locked.filter(r => r.ok), '#lockedSummary', locked[0]);
+
+  const warnings = results.warnings || [];
+  const warningsDiv = document.getElementById('warnings');
+  warningsDiv.innerHTML = ''; 
+
+  if (warnings.length > 0) {
+      warnings.forEach(w => {
+          const div = document.createElement('div');
+          div.className = 'warn-item';
+          div.textContent = `⚠️ [${w.adapter || '全局'}]: ${w.message || w.error || 'Worker 日志警告'}`;
+          warningsDiv.appendChild(div);
+      });
+  }
+}
+
+function renderSummary(data, selector, bestResult) {
+  const div = document.querySelector(selector);
+  if (!data.length || !bestResult?.outputAmount) {
+    div.style.display = 'none';
+    return;
+  }
+  div.style.display = 'block';
+  div.innerHTML = `
+    <p>输入: <b>${queryPair.amount} ${queryPair.from}</b></p>
+    <p>最优 (<b>${escapeHtml(bestResult.name)}</b>): 
+       <b style="color:green; font-size: 1.2em;">${Number(bestResult.outputAmount).toFixed(6)} ${queryPair.to}</b>
+    </p>
+  `;
+}
+
+// 【修复 2】：邮箱爬虫防护：动态拼接邮箱
+const setupEmail = () => {
+    // 请替换为您自己的邮箱信息
+    const user = 'yanfei6868'; 
+    const domain = 'icloud.com'; 
+    const mailElement = document.getElementById('mail');
+
+    if (mailElement) {
+        const fullEmail = user + '@' + domain;
+        mailElement.href = 'mailto:' + fullEmail;
+        mailElement.textContent = '📧 ' + fullEmail;
+    }
+};
+setupEmail();
+</script>
+</body>
+</html>
