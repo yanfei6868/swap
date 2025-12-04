@@ -4,7 +4,7 @@ export const meta = {
 };
 
 export async function init(adapterConfig, env, globalState) {
-    return { adapter: adapterConfig };
+    return null;
 }
 
 export async function flow(vars, chain, utils, state) {
@@ -13,12 +13,6 @@ export async function flow(vars, chain, utils, state) {
     }
     if (vars.toNetwork) {
         vars.network_to = vars.toNetwork;
-    }
-    const affiliateId = state.adapter.mappings?.AFFILIATE_ID || '';
-    if (affiliateId) {
-        vars.affiliate_id = affiliateId;
-    } else {
-        vars.affiliate_id = '';
     }
     return null;
 }
